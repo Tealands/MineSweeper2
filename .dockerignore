@@ -1,0 +1,9 @@
+.git
+.vs
+Debug
+Release
+x64
+*.slnx
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user

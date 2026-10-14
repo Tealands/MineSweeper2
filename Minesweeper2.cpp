@@ -1,8 +1,16 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
+#ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#else
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <cerrno>
+#endif
 
 #include <iostream>
 #include <vector>
@@ -21,8 +29,30 @@
 #include <memory>
 #include <cctype>
 #include <climits>
+#include <cstring>
+#include <unordered_map>
+
+#ifndef _WIN32
+using SOCKET = int;
+constexpr int INVALID_SOCKET = -1;
+constexpr int SOCKET_ERROR = -1;
+#define closesocket close
+#define SD_SEND SHUT_WR
+#define InetPtonA inet_pton
+constexpr int SOCKET_SEND_FLAGS = MSG_NOSIGNAL;
+#else
+constexpr int SOCKET_SEND_FLAGS = 0;
+#endif
 
 using namespace std;
+
+int socketError() {
+#ifdef _WIN32
+    return WSAGetLastError();
+#else
+    return errno;
+#endif
+}
 
 // 定数定義
 // SIZE は field.txt に合わせて動的に決定する
@@ -463,6 +493,7 @@ filesystem::path projectFilePath(const string& filename) {
         const filesystem::path inWorkingDirectory = filesystem::current_path() / filename;
         if (filesystem::exists(inWorkingDirectory)) return inWorkingDirectory;
 
+#ifdef _WIN32
         wchar_t executablePath[MAX_PATH];
         const DWORD length = GetModuleFileNameW(nullptr, executablePath, MAX_PATH);
         if (length > 0 && length < MAX_PATH) {
@@ -475,6 +506,7 @@ filesystem::path projectFilePath(const string& filename) {
                 directory = parent;
             }
         }
+#endif
 
         return inWorkingDirectory;
     }
@@ -539,6 +571,38 @@ filesystem::path projectFilePath(const string& filename) {
         return true;
     }
 
+    string requestHeaderValue(const string& request, const string& name) {
+        const size_t headerEnd = request.find("\r\n\r\n");
+        size_t lineStart = request.find("\r\n");
+        if (lineStart == string::npos || headerEnd == string::npos) return {};
+        lineStart += 2;
+
+        string expectedName = name;
+        transform(expectedName.begin(), expectedName.end(), expectedName.begin(),
+            [](unsigned char ch) { return static_cast<char>(tolower(ch)); });
+
+        while (lineStart < headerEnd) {
+            const size_t lineEnd = request.find("\r\n", lineStart);
+            if (lineEnd == string::npos || lineEnd > headerEnd) break;
+            const size_t colon = request.find(':', lineStart);
+            if (colon != string::npos && colon < lineEnd) {
+                string headerName = request.substr(lineStart, colon - lineStart);
+                transform(headerName.begin(), headerName.end(), headerName.begin(),
+                    [](unsigned char ch) { return static_cast<char>(tolower(ch)); });
+                if (headerName == expectedName) {
+                    size_t valueStart = colon + 1;
+                    while (valueStart < lineEnd &&
+                        isspace(static_cast<unsigned char>(request[valueStart]))) {
+                        ++valueStart;
+                    }
+                    return request.substr(valueStart, lineEnd - valueStart);
+                }
+            }
+            lineStart = lineEnd + 2;
+        }
+        return {};
+    }
+
     struct WebGame {
         unique_ptr<Board> board;
         int mineSetting = 100;
@@ -588,6 +652,9 @@ filesystem::path projectFilePath(const string& filename) {
         ostringstream response;
         response << "HTTP/1.1 " << status << ' ' << reason << "\r\n"
             << "Content-Type: " << contentType << "\r\n"
+            << "Access-Control-Allow-Origin: *\r\n"
+            << "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+            << "Access-Control-Allow-Headers: Content-Type, X-Session-Id\r\n"
             << "Content-Length: " << body.size() << "\r\n"
             << "Cache-Control: no-store\r\n"
             << "Connection: close\r\n\r\n"
@@ -599,13 +666,19 @@ filesystem::path projectFilePath(const string& filename) {
         size_t sent = 0;
         while (sent < response.size()) {
             const int count = send(client, response.data() + sent,
-                static_cast<int>(min(response.size() - sent, static_cast<size_t>(INT_MAX))), 0);
+                static_cast<int>(min(response.size() - sent, static_cast<size_t>(INT_MAX))),
+                SOCKET_SEND_FLAGS);
             if (count == SOCKET_ERROR || count == 0) return;
             sent += static_cast<size_t>(count);
         }
     }
 
-    void handleHttpRequest(SOCKET client, const string& request, WebGame& game) {
+    void handleApiRequest(SOCKET client, const string& method, const string& path,
+        const string& request, WebGame& game);
+    void handleNonApiRequest(SOCKET client, const string& method, const string& path);
+
+    void handleHttpRequest(SOCKET client, const string& request,
+        unordered_map<string, WebGame>& games) {
         const size_t headerEnd = request.find("\r\n\r\n");
         if (headerEnd == string::npos) {
             sendHttpResponse(client, httpResponse(400, "Bad Request", "application/json; charset=utf-8",
@@ -622,19 +695,34 @@ filesystem::path projectFilePath(const string& filename) {
             return;
         }
 
-        const string body = request.substr(headerEnd + 4);
-        if (method == "GET" && (path == "/" || path == "/index.html")) {
-            ifstream html(projectFilePath("index.html"), ios::binary);
-            if (!html) {
-                sendHttpResponse(client, httpResponse(500, "Internal Server Error",
-                    "text/plain; charset=utf-8", "index.html を読み込めません。"));
-                return;
-            }
-            const string contents((istreambuf_iterator<char>(html)), istreambuf_iterator<char>());
-            sendHttpResponse(client, httpResponse(200, "OK", "text/html; charset=utf-8", contents));
+        if (method == "OPTIONS") {
+            sendHttpResponse(client, httpResponse(204, "No Content",
+                "application/json; charset=utf-8", ""));
             return;
         }
 
+        const bool isApiPath = path == "/api/state" ||
+            path == "/api/new" || path == "/api/action";
+        if (isApiPath) {
+            const string sessionId = requestHeaderValue(request, "X-Session-Id");
+            if (sessionId.empty()) {
+                sendHttpResponse(client, httpResponse(400, "Bad Request",
+                    "application/json; charset=utf-8",
+                    "{\"error\":\"セッションIDが指定されていません。\"}"));
+                return;
+            }
+            WebGame& game = games[sessionId];
+            handleApiRequest(client, method, path, request, game);
+            return;
+        }
+
+        handleNonApiRequest(client, method, path);
+    }
+
+    void handleApiRequest(SOCKET client, const string& method, const string& path,
+        const string& request, WebGame& game) {
+        const size_t headerEnd = request.find("\r\n\r\n");
+        const string body = request.substr(headerEnd + 4);
         if (method == "GET" && path == "/api/state") {
             sendHttpResponse(client, httpResponse(200, "OK", "application/json; charset=utf-8",
                 game.stateJson()));
@@ -733,40 +821,84 @@ filesystem::path projectFilePath(const string& filename) {
             "{\"error\":\"指定されたURLは見つかりません。\"}"));
     }
 
+    void handleNonApiRequest(SOCKET client, const string& method, const string& path) {
+        if (method == "GET" && (path == "/" || path == "/index.html")) {
+            ifstream html(projectFilePath("index.html"), ios::binary);
+            if (!html) {
+                sendHttpResponse(client, httpResponse(500, "Internal Server Error",
+                    "text/plain; charset=utf-8", "index.html を読み込めません。"));
+                return;
+            }
+            const string contents((istreambuf_iterator<char>(html)), istreambuf_iterator<char>());
+            sendHttpResponse(client, httpResponse(200, "OK", "text/html; charset=utf-8", contents));
+            return;
+        }
+
+        sendHttpResponse(client, httpResponse(404, "Not Found", "application/json; charset=utf-8",
+            "{\"error\":\"指定されたURLは見つかりません。\"}"));
+    }
+
     int runWebServer() {
+#ifdef _WIN32
         WSADATA winsockData;
         const int startupResult = WSAStartup(MAKEWORD(2, 2), &winsockData);
         if (startupResult != 0) {
             cerr << "Winsock の初期化に失敗しました: " << startupResult << endl;
             return 1;
         }
+#endif
 
         SOCKET server = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (server == INVALID_SOCKET) {
-            cerr << "サーバーソケットを作成できません: " << WSAGetLastError() << endl;
+            cerr << "サーバーソケットを作成できません: " << socketError() << endl;
+#ifdef _WIN32
             WSACleanup();
+#endif
             return 1;
         }
 
         sockaddr_in address{};
         address.sin_family = AF_INET;
-        address.sin_port = htons(8080);
-        if (InetPtonA(AF_INET, "127.0.0.1", &address.sin_addr) != 1 ||
+        const char* portValue = getenv("PORT");
+        int port = 8080;
+        if (portValue != nullptr) {
+            try {
+                port = stoi(portValue);
+            }
+            catch (const exception&) {
+                cerr << "PORT の値が不正です。" << endl;
+                closesocket(server);
+#ifdef _WIN32
+                WSACleanup();
+#endif
+                return 1;
+            }
+        }
+        address.sin_port = htons(static_cast<unsigned short>(port));
+#ifdef _WIN32
+        const char* bindAddress = "127.0.0.1";
+#else
+        const char* bindAddress = "0.0.0.0";
+#endif
+        if (port < 1 || port > 65535 ||
+            InetPtonA(AF_INET, bindAddress, &address.sin_addr) != 1 ||
             bind(server, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == SOCKET_ERROR ||
             listen(server, SOMAXCONN) == SOCKET_ERROR) {
-            cerr << "http://127.0.0.1:8080 を起動できません: " << WSAGetLastError() << endl;
+            cerr << "Webサーバーを起動できません: " << socketError() << endl;
             closesocket(server);
+#ifdef _WIN32
             WSACleanup();
+#endif
             return 1;
         }
 
-        cout << "Web版マインスイーパーを起動しました: http://127.0.0.1:8080" << endl;
+        cout << "Web版マインスイーパーをポート " << port << " で起動しました。" << endl;
         cout << "終了するには Ctrl+C を押してください。" << endl;
-        WebGame game;
+        unordered_map<string, WebGame> games;
         while (true) {
             SOCKET client = accept(server, nullptr, nullptr);
             if (client == INVALID_SOCKET) {
-                cerr << "接続を受け付けられません: " << WSAGetLastError() << endl;
+                cerr << "接続を受け付けられません: " << socketError() << endl;
                 continue;
             }
 
@@ -804,14 +936,16 @@ filesystem::path projectFilePath(const string& filename) {
                     "{\"error\":\"HTTPリクエストが大きすぎるか不完全です。\"}"));
             }
             else {
-                handleHttpRequest(client, request, game);
+                handleHttpRequest(client, request, games);
             }
             shutdown(client, SD_SEND);
             closesocket(client);
         }
 
         closesocket(server);
+#ifdef _WIN32
         WSACleanup();
+#endif
         return 0;
     }
 // ホーム画面

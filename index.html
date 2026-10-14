@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="api-base-url" content="">
   <title>マインスイーパー</title>
   <style>
     :root {
@@ -141,6 +142,11 @@
     let busy = false;
     let flagMode = false;
     let latestState = null;
+    const API_BASE_URL = document.querySelector('meta[name="api-base-url"]')
+      .content.trim().replace(/\/$/, '');
+    const sessionIdKey = 'minesweeper-session-id';
+    const sessionId = sessionStorage.getItem(sessionIdKey) || crypto.randomUUID();
+    sessionStorage.setItem(sessionIdKey, sessionId);
 
     const show = id => {
       document.querySelectorAll('.screen').forEach(screen => {
@@ -149,10 +155,20 @@
     };
 
     async function request(path, options = {}) {
-      const response = await fetch(path, {
+      if (!API_BASE_URL && !['localhost', '127.0.0.1'].includes(location.hostname)) {
+        throw new Error('API URLが設定されていません。READMEのCloud Run設定を確認してください。');
+      }
+      const response = await fetch(`${API_BASE_URL}${path}`, {
         ...options,
-        headers: { 'Content-Type': 'application/json', ...options.headers }
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Id': sessionId,
+          ...options.headers
+        }
       });
+      if (!(response.headers.get('content-type') || '').includes('application/json')) {
+        throw new Error(`APIがJSON以外を返しました (HTTP ${response.status})。API URLを確認してください。`);
+      }
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'サーバーとの通信に失敗しました。');
       return result;

@@ -31,3 +31,25 @@ Visual Studio のデバッガーから起動する場合は、プロジェクト
 - すべての安全なマスを開くとクリアです。
 
 通常の起動（`--web` を付けない場合）は、従来のコンソール版です。
+
+## GitHub Pages と Cloud Run にデプロイする
+
+GitHub Pages は静的ファイルのみを配信するため、C++バックエンドは Cloud Run で動かします。
+
+1. Google Cloud CLI をインストールし、対象プロジェクトを選択して課金を有効にします。
+2. リポジトリのルートで次を実行します（`asia-northeast1` は利用するリージョンに変更できます）。
+
+   ```powershell
+   gcloud run deploy minesweeper-api --source . --region asia-northeast1 --allow-unauthenticated --max 1 --concurrency 1
+   ```
+
+3. デプロイ完了時に表示される Cloud Run の URL をコピーします。
+4. `index.html` の `api-base-url` メタタグの `content` にその URL を設定し、変更を GitHub に push します。例:
+
+   ```html
+   <meta name="api-base-url" content="https://minesweeper-api-xxxxx-an.a.run.app">
+   ```
+
+5. GitHub リポジトリの `Settings` → `Pages` で公開先を設定し、Pages の URL で動作を確認します。
+
+Cloud Run 側は `PORT` 環境変数で指定されたポートを `0.0.0.0` で待ち受けます。フロントエンドからのクロスオリジンAPI呼び出しとブラウザーの事前確認リクエストにも対応しています。各ブラウザータブのゲーム状態はセッションIDごとに分離されますが、状態はCloud Runインスタンスのメモリ上にあるため、インスタンスの再起動時にはゲームがリセットされます。
