@@ -42,14 +42,12 @@ GitHub Pages は静的ファイルのみを配信するため、C++バックエ�
    ```powershell
    gcloud run deploy minesweeper-api --source . --region asia-northeast1 --allow-unauthenticated --max 1 --concurrency 1
    ```
-
 3. デプロイ完了時に表示される Cloud Run の URL をコピーします。
 4. `index.html` の `api-base-url` メタタグの `content` にその URL を設定し、変更を GitHub に push します。例:
 
    ```html
    <meta name="api-base-url" content="https://minesweeper-api-xxxxx-an.a.run.app">
    ```
-
 5. GitHub リポジトリの `Settings` → `Pages` で公開先を設定し、Pages の URL で動作を確認します。
 
 Cloud Run 側は `PORT` 環境変数で指定されたポートを `0.0.0.0` で待ち受けます。フロントエンドからのクロスオリジンAPI呼び出しとブラウザーの事前確認リクエストにも対応しています。各ブラウザータブのゲーム状態はセッションIDごとに分離されますが、状態はCloud Runインスタンスのメモリ上にあるため、インスタンスの再起動時にはゲームがリセットされます。
