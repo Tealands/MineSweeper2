@@ -1,12 +1,12 @@
-# Visual Studio local caches and user-specific settings
+! Visual Studio local caches and user-specific settings
 .vs/
 *.vcxproj.user
 
-# Visual Studio build output and intermediate files (all platforms)
+! Visual Studio build output and intermediate files (all platforms)
 [Dd]ebug/
 [Rr]elease/
 
-# Compiled binaries and debug information outside build directories
+! Compiled binaries and debug information outside build directories
 *.exe
 *.obj
 *.o
@@ -16,6 +16,6 @@
 *.ipch
 /a.out
 
-# These rules do not affect files already tracked by Git.
-# Untrack generated files with git rm --cached; local files are kept.
-# Files in past commits remain in history unless history is rewritten.
+! These rules do not affect files already tracked by Git.
+! Untrack generated files with git rm --cached; local files are kept.
+! Files in past commits remain in history unless history is rewritten.

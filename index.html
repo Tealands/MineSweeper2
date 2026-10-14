@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>マインスイーパー</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Segoe UI", "Meiryo", sans-serif;
+      background: #1e2430;
+      color: #eee;
+    }
+    * { box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 16px;
+    }
+    .screen { display: none; width: min(100%, 1100px); text-align: center; }
+    .screen.active { display: block; }
+    h1 { margin: 0 0 24px; }
+    .menu button, .controls button {
+      border: 0;
+      border-radius: 8px;
+      color: #fff;
+      cursor: pointer;
+      font: inherit;
+    }
+    .menu button {
+      display: block;
+      width: min(280px, 100%);
+      margin: 12px auto;
+      padding: 14px;
+      background: #3b82f6;
+      font-size: 18px;
+    }
+    .menu button:hover { background: #2563eb; }
+    button:disabled { cursor: default; }
+    .status {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 12px 28px;
+      margin-bottom: 12px;
+      font-size: 17px;
+    }
+    .board-wrap {
+      max-width: 100%;
+      max-height: calc(100vh - 190px);
+      overflow: auto;
+      padding: 6px;
+      border-radius: 8px;
+      background: #111;
+    }
+    #board {
+      display: grid;
+      width: max-content;
+      gap: 2px;
+      margin: 0 auto;
+    }
+    .cell {
+      width: var(--cell-size);
+      height: var(--cell-size);
+      padding: 0;
+      border: 0;
+      border-radius: 3px;
+      background: #4b5563;
+      color: #fff;
+      font-size: clamp(10px, calc(var(--cell-size) * .68), 19px);
+      font-weight: 700;
+      line-height: 1;
+      user-select: none;
+    }
+    .cell:not(:disabled) { cursor: pointer; }
+    .cell:not(:disabled):hover { background: #6b7280; }
+    .cell.wall { background: #202631; }
+    .cell.opened { background: #d1d5db; color: #111; }
+    .cell.mine { background: #ef4444; }
+    .cell.flagged { color: #fca5a5; }
+    .cell.candidate { color: #15803d; }
+    .cell.n1 { color: #2563eb; }
+    .cell.n2 { color: #16a34a; }
+    .cell.n3 { color: #dc2626; }
+    .cell.n4 { color: #7c3aed; }
+    .cell.n5 { color: #b45309; }
+    .cell.n6 { color: #0891b2; }
+    .controls {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .controls button { padding: 10px 16px; background: #374151; }
+    .controls button:hover { background: #4b5563; }
+    .controls button.active { background: #f59e0b; color: #111; }
+    #message { min-height: 28px; margin-top: 12px; font-weight: 700; }
+    #message.error { color: #fca5a5; }
+    @media (max-width: 520px) {
+      body { padding: 10px; }
+      .status { font-size: 14px; gap: 8px 14px; }
+      .controls button { padding: 9px 12px; font-size: 14px; }
+    }
+  </style>
+</head>
+<body>
+  <section id="home" class="screen menu active">
+    <h1>💣 マインスイーパー</h1>
+    <button type="button" data-mines="100">簡単 (地雷 100個)</button>
+    <button type="button" data-mines="200">普通 (地雷 200個)</button>
+    <button type="button" data-mines="300">難しい (地雷 300個)</button>
+    <div id="home-message" role="status" aria-live="polite"></div>
+  </section>
+
+  <section id="game" class="screen">
+    <div class="status">
+      <span>🚩 残り地雷数: <span id="mines-left">0</span></span>
+      <span>🚩 旗: <span id="flags-count">0</span></span>
+      <span>💥 踏んだ回数: <span id="hit-count">0</span></span>
+    </div>
+    <div class="board-wrap">
+      <div id="board" role="grid" aria-label="マインスイーパーの盤面"></div>
+    </div>
+    <div id="message" role="status" aria-live="polite"></div>
+    <div class="controls">
+      <button type="button" id="flag-mode" aria-pressed="false">🚩 旗モード</button>
+      <button type="button" id="restart">もう一度</button>
+      <button type="button" id="back-home">ホームへ</button>
+    </div>
+  </section>
+
+  <script>
+    const board = document.getElementById('board');
+    const homeMessage = document.getElementById('home-message');
+    const gameMessage = document.getElementById('message');
+    let currentMines = 100;
+    let busy = false;
+    let flagMode = false;
+    let latestState = null;
+
+    const show = id => {
+      document.querySelectorAll('.screen').forEach(screen => {
+        screen.classList.toggle('active', screen.id === id);
+      });
+    };
+
+    async function request(path, options = {}) {
+      const response = await fetch(path, {
+        ...options,
+        headers: { 'Content-Type': 'application/json', ...options.headers }
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'サーバーとの通信に失敗しました。');
+      return result;
+    }
+
+    function setMessage(element, text, isError = false) {
+      element.textContent = text || '';
+      element.classList.toggle('error', isError);
+    }
+
+    function updateCellSize(cols) {
+      const availableWidth = Math.min(window.innerWidth - 48, 1080);
+      const cellSize = Math.max(12, Math.min(30,
+        Math.floor((availableWidth - (cols - 1) * 2) / cols)));
+      board.style.setProperty('--cell-size', `${cellSize}px`);
+    }
+
+    function render(state) {
+      latestState = state;
+      if (!state.active) {
+        show('home');
+        return;
+      }
+      currentMines = state.mineSetting;
+      show('game');
+      document.getElementById('mines-left').textContent = state.minesLeft;
+      document.getElementById('flags-count').textContent = state.flagsCount;
+      document.getElementById('hit-count').textContent = state.hitCount;
+      setMessage(gameMessage, state.message, false);
+      board.replaceChildren();
+      board.style.gridTemplateColumns = `repeat(${state.cols}, var(--cell-size))`;
+      updateCellSize(state.cols);
+
+      state.cells.forEach((row, rowIndex) => row.forEach((cellState, colIndex) => {
+        const cell = document.createElement('button');
+        cell.type = 'button';
+        cell.className = 'cell';
+        cell.setAttribute('role', 'gridcell');
+        cell.setAttribute('aria-label', `行${rowIndex + 1}、列${colIndex + 1}`);
+        cell.dataset.row = rowIndex;
+        cell.dataset.col = colIndex;
+        cell.disabled = state.won;
+        if (!cellState.playable) {
+          cell.classList.add('wall');
+          cell.disabled = true;
+        } else if (cellState.mine) {
+          cell.classList.add('opened', 'mine');
+          cell.textContent = '💣';
+        } else if (cellState.opened) {
+          cell.classList.add('opened');
+          if (cellState.candidate) {
+            cell.classList.add('candidate');
+            cell.textContent = 'J';
+          } else if (cellState.value > 0) {
+            cell.classList.add(`n${cellState.value}`);
+            cell.textContent = cellState.value;
+          }
+        } else if (cellState.flagged) {
+          cell.classList.add('flagged');
+          cell.textContent = '🚩';
+        }
+        board.appendChild(cell);
+      }));
+    }
+
+    async function startGame(mines) {
+      if (busy) return;
+      busy = true;
+      currentMines = mines;
+      setMessage(homeMessage, '');
+      try {
+        const state = await request('/api/new', {
+          method: 'POST',
+          body: JSON.stringify({ mines })
+        });
+        flagMode = false;
+        document.getElementById('flag-mode').classList.remove('active');
+        document.getElementById('flag-mode').setAttribute('aria-pressed', 'false');
+        render(state);
+      } catch (error) {
+        setMessage(homeMessage, error.message, true);
+      } finally {
+        busy = false;
+      }
+    }
+
+    async function performAction(row, col, action) {
+      if (busy) return;
+      busy = true;
+      try {
+        render(await request('/api/action', {
+          method: 'POST',
+          body: JSON.stringify({ row, col, action })
+        }));
+      } catch (error) {
+        setMessage(gameMessage, error.message, true);
+      } finally {
+        busy = false;
+      }
+    }
+
+    document.querySelectorAll('#home [data-mines]').forEach(button => {
+      button.addEventListener('click', () => startGame(Number(button.dataset.mines)));
+    });
+    board.addEventListener('click', event => {
+      const cell = event.target.closest('.cell');
+      if (!cell || cell.disabled) return;
+      performAction(Number(cell.dataset.row), Number(cell.dataset.col),
+        flagMode ? 'flag' : 'open');
+    });
+    board.addEventListener('contextmenu', event => {
+      const cell = event.target.closest('.cell');
+      if (!cell || cell.disabled) return;
+      event.preventDefault();
+      performAction(Number(cell.dataset.row), Number(cell.dataset.col), 'flag');
+    });
+    document.getElementById('flag-mode').addEventListener('click', event => {
+      flagMode = !flagMode;
+      event.currentTarget.classList.toggle('active', flagMode);
+      event.currentTarget.setAttribute('aria-pressed', String(flagMode));
+    });
+    document.getElementById('restart').addEventListener('click', () => startGame(currentMines));
+    document.getElementById('back-home').addEventListener('click', () => show('home'));
+    window.addEventListener('resize', () => {
+      if (!document.getElementById('game').classList.contains('active')) return;
+      if (latestState) updateCellSize(latestState.cols);
+    });
+
+    request('/api/state').then(render).catch(error => {
+      setMessage(homeMessage, error.message, true);
+    });
+  </script>
+</body>
+</html>
