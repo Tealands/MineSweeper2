@@ -19,3 +19,6 @@
 ! These rules do not affect files already tracked by Git.
 ! Untrack generated files with git rm --cached; local files are kept.
 ! Files in past commits remain in history unless history is rewritten.
+
+node_modules/
+dist/

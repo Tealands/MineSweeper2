@@ -1,22 +1,15 @@
-FROM debian:bookworm-slim AS build
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends g++ \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /src
-COPY Minesweeper2.cpp .
-RUN mkdir -p /app \
-    && g++ -std=c++20 -O2 -Wall -Wextra -pedantic -pthread -o /app/minesweeper Minesweeper2.cpp
-
-FROM debian:bookworm-slim
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends libstdc++6 \
-    && rm -rf /var/lib/apt/lists/*
-
+﻿FROM node:22-alpine AS build
 WORKDIR /app
-COPY --from=build /app/minesweeper .
-COPY field.txt .
+COPY package*.json tsconfig.json ./
+RUN npm install
+COPY server.ts ./
+RUN npm run build
 
-CMD ["/app/minesweeper", "--web"]
+FROM node:22-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app/dist ./dist
+COPY index.html ./
+COPY field/field1.txt ./field/field1.txt
+EXPOSE 8080
+CMD ["node", "dist/server.js"]

@@ -1,4 +1,4 @@
-.git
+﻿.git
 .vs
 Debug
 Release
@@ -7,3 +7,6 @@ x64
 *.vcxproj
 *.vcxproj.filters
 *.vcxproj.user
+
+node_modules
+dist

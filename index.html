@@ -81,7 +81,10 @@
     .cell.wall { background: #202631; }
     .cell.opened { background: #d1d5db; color: #111; }
     .cell.mine { background: #ef4444; }
-    .cell.flagged { color: #fca5a5; }
+    .cell.flagged.flag-red { color: #f87171; }
+    .cell.flagged.flag-blue { color: #60a5fa; }
+    .cell.flagged.flag-yellow { color: #facc15; }
+    .cell.flagged.flag-green { color: #4ade80; }
     .cell.candidate { color: #15803d; }
     .cell.n1 { color: #2563eb; }
     .cell.n2 { color: #16a34a; }
@@ -99,6 +102,11 @@
     .controls button { padding: 10px 16px; background: #374151; }
     .controls button:hover { background: #4b5563; }
     .controls button.active { background: #f59e0b; color: #111; }
+    #flag-color { min-width: 150px; }
+    #flag-color.flag-red { color: #f87171; }
+    #flag-color.flag-blue { color: #60a5fa; }
+    #flag-color.flag-yellow { color: #facc15; }
+    #flag-color.flag-green { color: #4ade80; }
     #message { min-height: 28px; margin-top: 12px; font-weight: 700; }
     #message.error { color: #fca5a5; }
     @media (max-width: 520px) {
@@ -129,6 +137,7 @@
     <div id="message" role="status" aria-live="polite"></div>
     <div class="controls">
       <button type="button" id="flag-mode" aria-pressed="false">🚩 旗モード</button>
+      <button type="button" id="flag-color" class="flag-red" title="クリックまたはマウスホイールで旗の色を切り替え">旗の色: 赤</button>
       <button type="button" id="restart">もう一度</button>
       <button type="button" id="back-home">ホームへ</button>
     </div>
@@ -142,6 +151,13 @@
     let busy = false;
     let flagMode = false;
     let latestState = null;
+    const flagColors = [
+      { id: 'red', label: '赤' },
+      { id: 'blue', label: '青' },
+      { id: 'yellow', label: '黄' },
+      { id: 'green', label: '緑' }
+    ];
+    let flagColorIndex = 0;
     const API_BASE_URL = document.querySelector('meta[name="api-base-url"]')
       .content.trim().replace(/\/$/, '');
     const sessionIdKey = 'minesweeper-session-id';
@@ -177,6 +193,19 @@
     function setMessage(element, text, isError = false) {
       element.textContent = text || '';
       element.classList.toggle('error', isError);
+    }
+
+    function updateFlagColor() {
+      const color = flagColors[flagColorIndex];
+      const colorButton = document.getElementById('flag-color');
+      colorButton.textContent = `旗の色: ${color.label}`;
+      colorButton.className = `flag-${color.id}`;
+      colorButton.setAttribute('aria-label', `旗の色: ${color.label}。クリックまたはホイールで切り替え`);
+    }
+
+    function cycleFlagColor(direction = 1) {
+      flagColorIndex = (flagColorIndex + direction + flagColors.length) % flagColors.length;
+      updateFlagColor();
     }
 
     function updateCellSize(cols) {
@@ -227,8 +256,8 @@
             cell.textContent = cellState.value;
           }
         } else if (cellState.flagged) {
-          cell.classList.add('flagged');
-          cell.textContent = '🚩';
+          cell.classList.add('flagged', `flag-${cellState.flagColor || 'red'}`);
+          cell.textContent = '\u2691'
         }
         board.appendChild(cell);
       }));
@@ -261,7 +290,7 @@
       try {
         render(await request('/api/action', {
           method: 'POST',
-          body: JSON.stringify({ row, col, action })
+          body: JSON.stringify({ row, col, action, flagColor: flagColors[flagColorIndex].id })
         }));
       } catch (error) {
         setMessage(gameMessage, error.message, true);
@@ -290,6 +319,12 @@
       event.currentTarget.classList.toggle('active', flagMode);
       event.currentTarget.setAttribute('aria-pressed', String(flagMode));
     });
+    document.getElementById('flag-color').addEventListener('click', () => cycleFlagColor());
+    document.querySelector('.board-wrap').addEventListener('wheel', event => {
+      event.preventDefault();
+      cycleFlagColor(event.deltaY > 0 ? 1 : -1);
+    }, { passive: false });
+    updateFlagColor();
     document.getElementById('restart').addEventListener('click', () => startGame(currentMines));
     document.getElementById('back-home').addEventListener('click', () => show('home'));
     window.addEventListener('resize', () => {
