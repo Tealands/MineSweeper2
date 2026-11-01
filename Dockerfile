@@ -10,6 +10,6 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/dist ./dist
 COPY index.html ./
-COPY field/field1.txt ./field/field1.txt
+COPY field/field.txt ./field/field.txt
 EXPOSE 8080
 CMD ["node", "dist/server.js"]
