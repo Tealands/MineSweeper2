@@ -3,7 +3,6 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="api-base-url" content="">
   <title>マインスイーパー</title>
   <style>
     :root {
@@ -40,6 +39,37 @@
       font-size: 18px;
     }
     .menu button:hover { background: #2563eb; }
+    .menu button.secondary {
+      background: #374151;
+      font-size: 16px;
+    }
+    .menu button.secondary:hover { background: #4b5563; }
+    .rules-screen { max-width: 760px; margin: 0 auto; }
+    .rules-screen h1 { margin-bottom: 8px; }
+    .rules-intro { margin: 0 0 24px; color: #cbd5e1; }
+    .rules-card {
+      margin: 12px 0;
+      padding: 18px 22px;
+      border: 1px solid #374151;
+      border-radius: 12px;
+      background: #252d3b;
+      text-align: left;
+    }
+    .rules-card h2 { margin: 0 0 10px; font-size: 19px; }
+    .rules-card ul { margin: 0; padding-left: 1.4em; color: #d1d5db; }
+    .rules-card li + li { margin-top: 7px; }
+    .rules-card strong { color: #fff; }
+    .rules-back {
+      margin-top: 12px;
+      padding: 12px 20px;
+      border: 0;
+      border-radius: 8px;
+      background: #3b82f6;
+      color: #fff;
+      cursor: pointer;
+      font: inherit;
+    }
+    .rules-back:hover { background: #2563eb; }
     button:disabled { cursor: default; }
     .status {
       display: flex;
@@ -115,6 +145,7 @@
       body { padding: 10px; }
       .status { font-size: 14px; gap: 8px 14px; }
       .controls button { padding: 9px 12px; font-size: 14px; }
+      .rules-card { padding: 16px; }
     }
   </style>
 </head>
@@ -124,7 +155,41 @@
     <button type="button" data-mines="100">簡単 (地雷 100個)</button>
     <button type="button" data-mines="200">普通 (地雷 200個)</button>
     <button type="button" data-mines="300">理不尽 (地雷 300個)</button>
+    <button type="button" class="secondary" id="show-rules">遊び方・ルール</button>
     <div id="home-message" role="status" aria-live="polite"></div>
+  </section>
+
+  <section id="rules" class="screen rules-screen" aria-labelledby="rules-title">
+    <h1 id="rules-title">📖 遊び方・ルール</h1>
+    <p class="rules-intro">地雷を避けながら安全なマスをすべて開き、依頼をクリアしましょう。</p>
+    <div class="rules-card">
+      <h2>基本の遊び方</h2>
+      <ul>
+        <li>難易度を選ぶとゲーム開始。地雷は <strong>100・200・300個</strong> から選べます。</li>
+        <li>マスをクリックして開きます。数字は、そのマスの周囲8マスにある地雷の数です。</li>
+        <li>ゲーム開始後、最初の通常クリックで選んだマスには地雷がありません（先に仲間・撤去依頼を使った場合を除く）。安全なマスを開くと、周囲の安全なマスも続けて開くことがあります。</li>
+        <li>地雷と思うマスは右クリックで旗を立てます。もう一度右クリックすると旗を外せます。</li>
+        <li>旗の色ボタン、または盤面上でマウスホイールを操作すると、旗の色を切り替えられます。</li>
+      </ul>
+    </div>
+    <div class="rules-card">
+      <h2>仲間と撤去依頼</h2>
+      <ul>
+        <li><strong>仲間モード（1回 500$）:</strong> ボタンを押してマスをクリックすると、仲間がランダムな未開封マスを調査します。地雷なら「×」で知らせます。</li>
+        <li><strong>撤去依頼（1回 100$）:</strong> ボタンを押して対象マスをクリック。地雷があれば撤去し、安全なマスならそのマスを開きます。</li>
+            <li>どちらも所持金を消費します。使えるのは所持金が足りている場合だけです。</li>
+      </ul>
+    </div>
+    <div class="rules-card">
+      <h2>報酬とクリア条件</h2>
+      <ul>
+        <li>開始時の所持金は <strong>地雷数 × 1,000$</strong> です。</li>
+        <li>地雷を踏むと治療費として <strong>100,000$</strong> を支払います。ゲームは続けられます。</li>
+        <li>旗を立てることは必須ではありません。地雷以外の安全なマスをすべて開くとクリアです。</li>
+        <li>クリア時に残った所持金が成績になります。安全に進めて報酬を残しましょう。</li>
+      </ul>
+    </div>
+    <button type="button" class="rules-back" id="rules-home">難易度選択に戻る</button>
   </section>
 
   <section id="game" class="screen">
@@ -156,6 +221,8 @@
     let allyMode = false;
     let removeMode = false;
     let latestState = null;
+    let game = null;
+    let fieldLines = null;
     const flagColors = [
       { id: 'red', label: '赤' },
       { id: 'blue', label: '青' },
@@ -163,11 +230,6 @@
       { id: 'green', label: '緑' }
     ];
     let flagColorIndex = 0;
-    const API_BASE_URL = document.querySelector('meta[name="api-base-url"]')
-      .content.trim().replace(/\/$/, '');
-    const sessionIdKey = 'minesweeper-session-id';
-    const sessionId = sessionStorage.getItem(sessionIdKey) || crypto.randomUUID();
-    sessionStorage.setItem(sessionIdKey, sessionId);
 
     const show = id => {
       document.querySelectorAll('.screen').forEach(screen => {
@@ -175,24 +237,214 @@
       });
     };
 
-    async function request(path, options = {}) {
-      if (!API_BASE_URL && !['localhost', '127.0.0.1'].includes(location.hostname)) {
-        throw new Error('API URLが設定されていません。READMEのCloud Run設定を確認してください。');
+    async function loadField() {
+      if (fieldLines) return fieldLines;
+      const response = await fetch(new URL('field/field.txt', document.baseURI));
+      if (!response.ok) throw new Error(`盤面データを読み込めませんでした (HTTP ${response.status})。`);
+      const text = await response.text();
+      const lines = text.trimEnd().split(/\r?\n/);
+      if (!lines.length || !lines[0].length) throw new Error('盤面データが空です。');
+      fieldLines = lines;
+      return fieldLines;
+    }
+
+    function shuffle(items) {
+      for (let i = items.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [items[i], items[j]] = [items[j], items[i]];
       }
-      const response = await fetch(`${API_BASE_URL}${path}`, {
-        ...options,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Session-Id': sessionId,
-          ...options.headers
+      return items;
+    }
+
+    function createGame(mines, lines) {
+      const rows = lines.length;
+      const cols = Math.max(...lines.map(line => line.length));
+      const cells = lines.map(line => Array.from({ length: cols }, (_, col) => ({
+        playable: line[col] === '?',
+        mine: false,
+        removed: false,
+        exploded: false,
+        state: 'closed',
+        flagColor: null,
+        allyDanger: false
+      })));
+      const playableCount = cells.flat().filter(cell => cell.playable).length;
+      if (mines >= playableCount) throw new Error('このフィールドには指定された数の地雷を配置できません。');
+      return {
+        mineSetting: mines,
+        firstMove: true,
+        won: false,
+        money: mines * 1000,
+        reward: mines * 1000,
+        allyCost: 500,
+        removeCost: 100,
+        board: {
+          rows,
+          cols,
+          cells,
+          totalMines: mines,
+          safeCellsToOpen: playableCount - mines,
+          hits: 0,
+          flags: 0,
+          initialized: false
         }
-      });
-      if (!(response.headers.get('content-type') || '').includes('application/json')) {
-        throw new Error(`APIがJSON以外を返しました (HTTP ${response.status})。API URLを確認してください。`);
+      };
+    }
+
+    function coordinates(targetGame) {
+      return targetGame.board.cells.flatMap((row, r) =>
+        row.flatMap((cell, c) => cell.playable ? [[r, c]] : []));
+    }
+
+    function neighbors(targetGame, row, col) {
+      const result = [];
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          if (!dr && !dc) continue;
+          const r = row + dr;
+          const c = col + dc;
+          if (targetGame.board.cells[r]?.[c]?.playable) result.push([r, c]);
+        }
       }
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'サーバーとの通信に失敗しました。');
       return result;
+    }
+
+    function initialize(targetGame, safeRow, safeCol) {
+      const boardState = targetGame.board;
+      const available = shuffle(coordinates(targetGame).filter(([row, col]) =>
+        safeRow === undefined || row !== safeRow || col !== safeCol));
+      available.slice(0, Math.min(boardState.totalMines, available.length))
+        .forEach(([row, col]) => { boardState.cells[row][col].mine = true; });
+      boardState.initialized = true;
+    }
+
+    function openCell(targetGame, row, col) {
+      const cell = targetGame.board.cells[row]?.[col];
+      if (!cell?.playable || cell.state !== 'closed' || cell.mine) return;
+      cell.state = 'opened';
+      targetGame.board.safeCellsToOpen--;
+      if (neighbors(targetGame, row, col).every(([r, c]) => !targetGame.board.cells[r][c].mine)) {
+        neighbors(targetGame, row, col).forEach(([r, c]) => openCell(targetGame, r, c));
+      }
+    }
+
+    function viewState(message = '') {
+      const boardState = game.board;
+      const cells = boardState.cells.map((row, r) => row.map((cell, c) => {
+        const opened = cell.playable && cell.state === 'opened';
+        return {
+          playable: cell.playable,
+          opened,
+          flagged: cell.state === 'flagged',
+          flagColor: cell.flagColor,
+          mine: cell.playable && cell.mine && (opened || boardState.safeCellsToOpen === 0),
+          removed: cell.removed,
+          exploded: cell.exploded,
+          allyDanger: cell.playable && cell.allyDanger && cell.state === 'closed',
+          value: opened && !cell.mine
+            ? neighbors(game, r, c).filter(([nr, nc]) => boardState.cells[nr][nc].mine).length
+            : 0
+        };
+      }));
+      return {
+        active: true,
+        rows: boardState.rows,
+        cols: boardState.cols,
+        mineSetting: game.mineSetting,
+        minesLeft: boardState.totalMines,
+        hitCount: boardState.hits,
+        flagsCount: boardState.flags,
+        money: game.money,
+        reward: game.reward,
+        allyCost: game.allyCost,
+        removeCost: game.removeCost,
+        started: !game.firstMove,
+        won: game.won,
+        message,
+        cells
+      };
+    }
+
+    function act(row, col, action) {
+      const boardState = game.board;
+      const cell = boardState.cells[row][col];
+      let hit = false;
+      if (cell.exploded) return { hit, removedMine: false };
+      const firstOpen = action === 'open' && !boardState.initialized;
+      let removedMine = false;
+
+      if (action === 'flag') {
+        if (cell.state === 'closed') {
+          cell.state = 'flagged';
+          cell.flagColor = flagColors[flagColorIndex].id;
+          boardState.flags++;
+        } else if (cell.state === 'flagged') {
+          cell.state = 'closed';
+          cell.flagColor = null;
+          boardState.flags--;
+        }
+        return { hit, removedMine };
+      }
+
+      if (action === 'ally') {
+        boardState.cells.flat().forEach(item => { item.allyDanger = false; });
+        if (!boardState.initialized) initialize(game, row, col);
+        const candidates = shuffle(coordinates(game).filter(([r, c]) =>
+          boardState.cells[r][c].state === 'closed'));
+        const target = candidates[0];
+        if (!target) return { hit, removedMine };
+        const [targetRow, targetCol] = target;
+        const targetCell = boardState.cells[targetRow][targetCol];
+        if (targetCell.mine) targetCell.allyDanger = true;
+        else openCell(game, targetRow, targetCol);
+        return { hit, removedMine };
+      }
+
+      if (action === 'remove') {
+        if (!boardState.initialized) initialize(game);
+        if (cell.state === 'flagged') {
+          boardState.flags--;
+          cell.state = 'closed';
+          cell.flagColor = null;
+        }
+        if (cell.mine) {
+          cell.mine = false;
+          cell.removed = true;
+          cell.allyDanger = false;
+          boardState.totalMines = Math.max(0, boardState.totalMines - 1);
+          cell.state = 'opened';
+          removedMine = true;
+        } else {
+          openCell(game, row, col);
+        }
+        return { hit, removedMine };
+      }
+
+      if (!boardState.initialized) initialize(game, row, col);
+      if (cell.state === 'closed') {
+        if (cell.mine) {
+          cell.state = 'opened';
+          cell.exploded = true;
+          boardState.hits++;
+          boardState.totalMines = Math.max(0, boardState.totalMines - 1);
+          hit = true;
+        } else {
+          openCell(game, row, col);
+          if (firstOpen && boardState.totalMines > 0) {
+            let opened = boardState.cells.flat().filter(item =>
+              item.state === 'opened' && !item.mine).length;
+            for (const [r, c] of shuffle(coordinates(game))) {
+              if (opened >= 3) break;
+              const extra = boardState.cells[r][c];
+              if (extra.state === 'closed' && !extra.mine) {
+                openCell(game, r, c);
+                opened++;
+              }
+            }
+          }
+        }
+      }
+      return { hit, removedMine };
     }
 
     function setMessage(element, text, isError = false) {
@@ -229,10 +481,6 @@
 
     function render(state) {
       latestState = state;
-      if (!state.active) {
-        show('home');
-        return;
-      }
       currentMines = state.mineSetting;
       show('game');
       document.getElementById('mines-left').textContent = state.minesLeft;
@@ -296,15 +544,12 @@
       currentMines = mines;
       setMessage(homeMessage, '');
       try {
-        const state = await request('/api/new', {
-          method: 'POST',
-          body: JSON.stringify({ mines })
-        });
+        game = createGame(mines, await loadField());
         setRemoveMode(false);
         allyMode = false;
         document.getElementById('ally-mode').classList.remove('active');
         document.getElementById('ally-mode').setAttribute('aria-pressed', 'false');
-        render(state);
+        render(viewState('ゲーム開始、マスを選んでください。'));
       } catch (error) {
         setMessage(homeMessage, error.message, true);
       } finally {
@@ -312,24 +557,39 @@
       }
     }
 
-    async function performAction(row, col, action) {
-      if (busy) return;
-      busy = true;
-      try {
-        render(await request('/api/action', {
-          method: 'POST',
-          body: JSON.stringify({ row, col, action, flagColor: flagColors[flagColorIndex].id })
-        }));
-      } catch (error) {
-        setMessage(gameMessage, error.message, true);
-      } finally {
-        busy = false;
+    function performAction(row, col, action) {
+      if (!game || game.won) return;
+      const cell = game.board.cells[row]?.[col];
+      if (!cell?.playable) return;
+      if (action === 'ally' && game.money < game.allyCost) {
+        setMessage(gameMessage, `仲間を使うには${game.allyCost}$が必要です。`, true);
+        return;
       }
+      if (action === 'remove' && game.money < game.removeCost) {
+        setMessage(gameMessage, `撤去依頼には${game.removeCost}$が必要です。`, true);
+        return;
+      }
+      const result = act(row, col, action);
+      if (action === 'ally') game.money -= game.allyCost;
+      if (action === 'remove') game.money -= game.removeCost;
+      if (result.hit) game.money -= 100000;
+      if (action === 'open' || action === 'remove') game.firstMove = false;
+      game.won = game.board.safeCellsToOpen === 0;
+      const message = game.won ? 'クリア、すべての安全なマスを開きました。'
+        : result.hit ? '地雷を踏みました。治療費100000$を支払いました。'
+        : action === 'open' ? 'マスを開きました。'
+        : action === 'ally' ? '仲間が手伝い、マスを確認しました。'
+        : action === 'flag' ? '旗を更新しました。'
+        : result.removedMine ? '地雷を撤去しました。'
+        : 'このマスに地雷はありませんでした。撤去費用が発生し、マスを開きました。';
+      render(viewState(message));
     }
 
     document.querySelectorAll('#home [data-mines]').forEach(button => {
       button.addEventListener('click', () => startGame(Number(button.dataset.mines)));
     });
+    document.getElementById('show-rules').addEventListener('click', () => show('rules'));
+    document.getElementById('rules-home').addEventListener('click', () => show('home'));
     board.addEventListener('click', event => {
       const cell = event.target.closest('.cell');
       if (!cell || cell.disabled) return;
@@ -401,9 +661,6 @@
       if (latestState) updateCellSize(latestState.cols);
     });
 
-    request('/api/state').then(render).catch(error => {
-      setMessage(homeMessage, error.message, true);
-    });
   </script>
 </body>
 </html>

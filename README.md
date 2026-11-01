@@ -1,51 +1,34 @@
-﻿# MineSweeper2
+# MineSweeper2
 
-ブラウザーで遊べるマインスイーパーです。バックエンドはTypeScript（Node.js）で動作し、盤面とゲーム状態をセッションごとに管理します。`field/field.txt` の `?` がプレイ可能なマス、その他の文字が壁です。
+GitHub Pagesで公開できる、ブラウザーだけで動作するマインスイーパーです。ゲーム処理と状態管理はすべてブラウザー内で行い、サーバーやビルドは必要ありません。`field/field.txt` の `?` がプレイ可能なマス、その他の文字が壁です。
 
-## ローカルで起動
+## GitHub Pagesで公開
 
-Node.js 22以降を用意し、リポジトリのルートで実行します。
+1. このリポジトリをGitHubにpushします。
+2. リポジトリの **Settings → Pages** を開きます。
+3. **Build and deployment** の **Source** で **Deploy from a branch** を選びます。
+4. 公開するブランチ（例: `main`）とフォルダー **/(root)** を選び、**Save** を押します。
+5. デプロイ完了後、同じPages設定画面に表示されるURLを開きます。
+
+`index.html` と `field/field.txt` を同じリポジトリに置いたまま公開してください。フィールドデータは相対URLで読み込むため、`https://<ユーザー名>.github.io/<リポジトリ名>/` のようなプロジェクトページでも動作します。ファイルを更新して対象ブランチにpushすると、自動で再デプロイされます。
+
+## ローカルで確認
+
+ファイルを直接開くのではなく、リポジトリのルートで簡易HTTPサーバーを起動します。
 
 ```powershell
-npm install
-npm run dev
+py -m http.server 8000
 ```
 
-ブラウザーで http://127.0.0.1:8080 を開きます。開発時は `npm run dev`、通常起動は `npm run build` の後に `npm start` を使います。ポートは `PORT` 環境変数で変更できます。
-
-## Docker / Cloud Run
-
-```sh
-docker build -t minesweeper .
-docker run --rm -p 8080:8080 minesweeper
-```
-
-Cloud Run へは Google Cloud CLI からデプロイできます。
-
-```sh
-gcloud run deploy minesweeper-api --source . --region asia-northeast1 --allow-unauthenticated --max 1 --concurrency 1
-```
-
-デプロイ後、表示されたURLを `index.html` の `api-base-url` メタタグに設定してGitHub Pagesへpushします。Cloud Run側は `PORT` で指定されたポートを `0.0.0.0` で待ち受けます。ゲーム状態はインスタンスのメモリ上にあるため、インスタンスの再起動時にリセットされます。
-
-## API
-
-- `GET /api/state` — 現在のセッションの状態
-- `POST /api/new` — `{ "mines": 100 | 200 | 300 }` で新規ゲーム
-- `POST /api/action` — `{ "row": 0, "col": 0, "action": "open" | "flag" | "ally" | "remove" }` で操作
-
-`ally` と `remove` は追加の経済アクションです。`GET /api/state` のレスポンスには `money`、`reward`、`allyCost`、`removeCost` が含まれます。
-
-各APIリクエストには `X-Session-Id` ヘッダーが必要です。フロントエンドはブラウザーのセッションIDを送信します。
-
-`Minesweeper2.cpp` は既存のコンソール版として残しています。Webバックエンドの起動にC++ビルドは不要です。
+ブラウザーで http://127.0.0.1:8000 を開きます。Pythonがない場合は、VS CodeのLive Serverなど静的ファイルを配信するサーバーを利用してください。
 
 ## ゲームシステム
 
-この版では、通常のマインスイーパーに「経済ルール」を追加しています。
+- 難易度は地雷100・200・300個から選択できます。
+- 初期所持金は `地雷数 × 1000$` です。
+- 仲間支援は1回 `500$`。未開封マスをランダムに調査します。
+- 撤去依頼は1回 `100$`。選んだマスの地雷を撤去し、安全なマスなら開きます。
+- 地雷を踏むと治療費 `100000$` が発生します。
+- すべての安全なマスを開くとクリアです。クリア時の残金が成績になります。
 
-- 受注報酬: 初期所持金は `地雷数 × 1000$`
-- 仲間支援: `🤝 仲間モード` を使うと 1 回につき `500$` を消費して、ランダムな未開封マスを調査します
-- 撤去依頼: `💸 撤去依頼` を押して対象マスを選びます。地雷があれば撤去してチェックマークを表示し、地雷がなくても `100$` を支払ってそのマスを開きます
-- 治療費: 地雷を踏むたびに `100000$` を支払います
-- 収支: 盤面を安全に進めるほど残金が残り、最終的な残額をゲームの成績として扱えます
+ゲーム状態はブラウザー内にあり、サーバーへの通信やアカウント登録はありません。
