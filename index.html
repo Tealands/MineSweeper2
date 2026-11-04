@@ -168,7 +168,7 @@
         <li>難易度を選ぶとゲーム開始。地雷は <strong>100・200・300個</strong> から選べます。</li>
         <li>マスをクリックして開きます。数字は、そのマスの周囲8マスにある地雷の数です。</li>
         <li>ゲーム開始後、最初の通常クリックで選んだマスには地雷がありません（先に仲間・撤去依頼を使った場合を除く）。安全なマスを開くと、周囲の安全なマスも続けて開くことがあります。</li>
-        <li>地雷と思うマスは右クリックで旗を立てます。もう一度右クリックすると旗を外せます。</li>
+        <li>地雷と思うマスは右クリックで旗を立てます。旗と違う色を選んでから右クリックすると色を変更でき、同じ色で右クリックすると旗を外せます。</li>
         <li>旗の色ボタン、または盤面上でマウスホイールを操作すると、旗の色を切り替えられます。</li>
       </ul>
     </div>
@@ -176,7 +176,7 @@
       <h2>仲間と撤去依頼</h2>
       <ul>
         <li><strong>仲間モード（1回 500$）:</strong> ボタンを押してマスをクリックすると、仲間がランダムな未開封マスを調査します。地雷なら「×」で知らせます。</li>
-        <li><strong>撤去依頼（1回 100$）:</strong> ボタンを押して対象マスをクリック。地雷があれば撤去し、安全なマスならそのマスを開きます。</li>
+        <li><strong>撤去依頼（1回 100$）:</strong> ボタンでモードをオンにして対象マスをクリック。地雷があれば撤去し、安全なマスならそのマスを開きます。モードはボタンでオフにするまで続き、クリックごとに費用がかかります。</li>
             <li>どちらも所持金を消費します。使えるのは所持金が足りている場合だけです。</li>
       </ul>
     </div>
@@ -379,9 +379,14 @@
           cell.flagColor = flagColors[flagColorIndex].id;
           boardState.flags++;
         } else if (cell.state === 'flagged') {
-          cell.state = 'closed';
-          cell.flagColor = null;
-          boardState.flags--;
+          const selectedColor = flagColors[flagColorIndex].id;
+          if (cell.flagColor === selectedColor) {
+            cell.state = 'closed';
+            cell.flagColor = null;
+            boardState.flags--;
+          } else {
+            cell.flagColor = selectedColor;
+          }
         }
         return { hit, removedMine };
       }
@@ -594,7 +599,6 @@
       const cell = event.target.closest('.cell');
       if (!cell || cell.disabled) return;
       if (removeMode) {
-        setRemoveMode(false);
         performAction(Number(cell.dataset.row), Number(cell.dataset.col), 'remove');
         return;
       }
@@ -632,7 +636,7 @@
         return;
       }
       if (busy) return;
-      if (latestState.won) {
+      if (latestState.won && !removeMode) {
         setMessage(gameMessage, 'ゲームクリア済みです。もう一度遊ぶ場合はホームへ戻ってください。', false);
         return;
       }
