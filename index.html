@@ -391,10 +391,9 @@
       }
 
       if (action === 'ally') {
-        boardState.cells.flat().forEach(item => { item.allyDanger = false; });
         if (!boardState.initialized) initialize(game);
         const candidates = shuffle(coordinates(game).filter(([r, c]) =>
-          boardState.cells[r][c].state === 'closed'));
+          boardState.cells[r][c].state === 'closed' && !boardState.cells[r][c].allyDanger));
         const target = candidates[0];
         if (!target) return { hit, removedMine, performed: false };
         const [targetRow, targetCol] = target;
