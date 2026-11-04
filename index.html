@@ -169,7 +169,7 @@
         <li>マスをクリックして開きます。数字は、そのマスの周囲8マスにある地雷の数です。</li>
         <li>ゲーム開始後、最初の通常クリックで選んだマスには地雷がありません（先に仲間・撤去依頼を使った場合を除く）。安全なマスを開くと、周囲の安全なマスも続けて開くことがあります。</li>
         <li>地雷と思うマスは右クリックで旗を立てます。旗と違う色を選んでから右クリックすると色を変更でき、同じ色で右クリックすると旗を外せます。</li>
-        <li>旗の色ボタン、または盤面上でマウスホイールを操作すると、旗の色を切り替えられます。</li>
+        <li>画面はマウスホイールを回して上下にスクロールします。盤面上でホイールを押し込むと旗の色を切り替えられます。</li>
       </ul>
     </div>
     <div class="rules-card">
@@ -206,7 +206,7 @@
     <div class="controls">
       <button type="button" id="ally-help" aria-label="仲間に任せる (500$)">🤝 仲間に任せる</button>
       <button type="button" id="remove-mine" aria-label="撤去依頼モード" aria-pressed="false">💸 撤去依頼 (100$)</button>
-      <button type="button" id="flag-color" class="flag-red" title="クリックまたはマウスホイールで旗の色を切り替え">旗の色: 赤</button>
+      <button type="button" id="flag-color" class="flag-red" title="クリック、または盤面上でマウスホイールを押し込むと旗の色を切り替え">旗の色: 赤</button>
       <button type="button" id="restart">もう一度</button>
       <button type="button" id="back-home">ホームへ</button>
     </div>
@@ -468,7 +468,7 @@
       const colorButton = document.getElementById('flag-color');
       colorButton.textContent = `旗の色: ${color.label}`;
       colorButton.className = `flag-${color.id}`;
-      colorButton.setAttribute('aria-label', `旗の色: ${color.label}。クリックまたはホイールで切り替え`);
+      colorButton.setAttribute('aria-label', `旗の色: ${color.label}。クリック、または盤面上でマウスホイールを押し込むと切り替え`);
     }
 
     function cycleFlagColor(direction = 1) {
@@ -642,10 +642,11 @@
       setMessage(gameMessage, enabled ? '撤去依頼モードON: 撤去するマスをクリックしてください。' : '撤去依頼モードを解除しました。', false);
     });
     document.getElementById('flag-color').addEventListener('click', () => cycleFlagColor());
-    document.querySelector('.board-wrap').addEventListener('wheel', event => {
+    document.querySelector('.board-wrap').addEventListener('mousedown', event => {
+      if (event.button !== 1) return;
       event.preventDefault();
-      cycleFlagColor(event.deltaY > 0 ? 1 : -1);
-    }, { passive: false });
+      cycleFlagColor();
+    });
     updateFlagColor();
     document.getElementById('restart').addEventListener('click', () => startGame(currentMines));
     document.getElementById('back-home').addEventListener('click', () => {
