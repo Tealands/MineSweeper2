@@ -154,7 +154,7 @@
     <h1>💣 マインスイーパー</h1>
     <button type="button" data-mines="100">簡単 (地雷 100個)</button>
     <button type="button" data-mines="200">普通 (地雷 200個)</button>
-    <button type="button" data-mines="300">理不尽 (地雷 300個)</button>
+    <button type="button" data-mines="300">難しい (地雷 300個)</button>
     <button type="button" class="secondary" id="show-rules">遊び方・ルール</button>
     <div id="home-message" role="status" aria-live="polite"></div>
   </section>
@@ -175,7 +175,7 @@
     <div class="rules-card">
       <h2>仲間と撤去依頼</h2>
       <ul>
-        <li><strong>仲間モード（1回 500$）:</strong> ボタンを押してマスをクリックすると、仲間がランダムな未開封マスを調査します。地雷なら「×」で知らせます。</li>
+        <li><strong>仲間に任せる（1回 500$）:</strong> ボタンを押すと、仲間がランダムな未開封マスを調査します。安全なら開き、地雷なら「×」で知らせます。</li>
         <li><strong>撤去依頼（1回 100$）:</strong> ボタンでモードをオンにして対象マスをクリック。地雷があれば撤去し、安全なマスならそのマスを開きます。モードはボタンでオフにするまで続き、クリックごとに費用がかかります。</li>
             <li>どちらも所持金を消費します。使えるのは所持金が足りている場合だけです。</li>
       </ul>
@@ -204,7 +204,7 @@
     </div>
     <div id="message" role="status" aria-live="polite"></div>
     <div class="controls">
-      <button type="button" id="ally-mode" aria-pressed="false" aria-label="仲間モードをオンオフ">🤝 仲間モード</button>
+      <button type="button" id="ally-help" aria-label="仲間に任せる (500$)">🤝 仲間に任せる</button>
       <button type="button" id="remove-mine" aria-label="撤去依頼モード" aria-pressed="false">💸 撤去依頼 (100$)</button>
       <button type="button" id="flag-color" class="flag-red" title="クリックまたはマウスホイールで旗の色を切り替え">旗の色: 赤</button>
       <button type="button" id="restart">もう一度</button>
@@ -218,7 +218,6 @@
     const gameMessage = document.getElementById('message');
     let currentMines = 100;
     let busy = false;
-    let allyMode = false;
     let removeMode = false;
     let latestState = null;
     let game = null;
@@ -367,9 +366,9 @@
 
     function act(row, col, action) {
       const boardState = game.board;
-      const cell = boardState.cells[row][col];
+      const cell = boardState.cells[row]?.[col];
       let hit = false;
-      if (cell.exploded) return { hit, removedMine: false };
+      if (cell?.exploded) return { hit, removedMine: false };
       const firstOpen = action === 'open' && !boardState.initialized;
       let removedMine = false;
 
@@ -393,16 +392,16 @@
 
       if (action === 'ally') {
         boardState.cells.flat().forEach(item => { item.allyDanger = false; });
-        if (!boardState.initialized) initialize(game, row, col);
+        if (!boardState.initialized) initialize(game);
         const candidates = shuffle(coordinates(game).filter(([r, c]) =>
           boardState.cells[r][c].state === 'closed'));
         const target = candidates[0];
-        if (!target) return { hit, removedMine };
+        if (!target) return { hit, removedMine, performed: false };
         const [targetRow, targetCol] = target;
         const targetCell = boardState.cells[targetRow][targetCol];
         if (targetCell.mine) targetCell.allyDanger = true;
         else openCell(game, targetRow, targetCol);
-        return { hit, removedMine };
+        return { hit, removedMine, performed: true };
       }
 
       if (action === 'remove') {
@@ -551,9 +550,6 @@
       try {
         game = createGame(mines, await loadField());
         setRemoveMode(false);
-        allyMode = false;
-        document.getElementById('ally-mode').classList.remove('active');
-        document.getElementById('ally-mode').setAttribute('aria-pressed', 'false');
         render(viewState('ゲーム開始、マスを選んでください。'));
       } catch (error) {
         setMessage(homeMessage, error.message, true);
@@ -565,7 +561,7 @@
     function performAction(row, col, action) {
       if (!game || game.won) return;
       const cell = game.board.cells[row]?.[col];
-      if (!cell?.playable) return;
+      if (action !== 'ally' && !cell?.playable) return;
       if (action === 'ally' && game.money < game.allyCost) {
         setMessage(gameMessage, `仲間を使うには${game.allyCost}$が必要です。`, true);
         return;
@@ -575,10 +571,14 @@
         return;
       }
       const result = act(row, col, action);
+      if (action === 'ally' && !result.performed) {
+        render(viewState('調査できる未開封マスがありません。'));
+        return;
+      }
       if (action === 'ally') game.money -= game.allyCost;
       if (action === 'remove') game.money -= game.removeCost;
       if (result.hit) game.money -= 100000;
-      if (action === 'open' || action === 'remove') game.firstMove = false;
+      if (action === 'open' || action === 'remove' || action === 'ally') game.firstMove = false;
       game.won = game.board.safeCellsToOpen === 0;
       const message = game.won ? 'クリア、すべての安全なマスを開きました。'
         : result.hit ? '地雷を踏みました。治療費100000$を支払いました。'
@@ -602,11 +602,6 @@
         performAction(Number(cell.dataset.row), Number(cell.dataset.col), 'remove');
         return;
       }
-      if (allyMode) {
-        event.preventDefault();
-        performAction(Number(cell.dataset.row), Number(cell.dataset.col), 'ally');
-        return;
-      }
       performAction(Number(cell.dataset.row), Number(cell.dataset.col), 'open');
     });
     board.addEventListener('contextmenu', event => {
@@ -616,19 +611,21 @@
         event.preventDefault();
         return;
       }
-      if (allyMode) {
-        event.preventDefault();
-        return;
-      }
       event.preventDefault();
       performAction(Number(cell.dataset.row), Number(cell.dataset.col), 'flag');
     });
-    document.getElementById('ally-mode').addEventListener('click', event => {
-      if (!allyMode) setRemoveMode(false);
-      allyMode = !allyMode;
-      event.currentTarget.classList.toggle('active', allyMode);
-      event.currentTarget.setAttribute('aria-pressed', String(allyMode));
-      setMessage(gameMessage, allyMode ? '仲間モードON: クリックで仲間が1マスを助けます。' : '仲間モードOFF: 通常の開封操作に戻りました。', false);
+    document.getElementById('ally-help').addEventListener('click', () => {
+      if (!latestState || !latestState.active) {
+        setMessage(gameMessage, '先にゲームを開始してください。', false);
+        return;
+      }
+      if (busy) return;
+      if (latestState.won) {
+        setMessage(gameMessage, 'ゲームクリア済みです。もう一度遊ぶ場合はホームへ戻ってください。', false);
+        return;
+      }
+      setRemoveMode(false);
+      performAction(undefined, undefined, 'ally');
     });
     document.getElementById('remove-mine').addEventListener('click', () => {
       if (!latestState || !latestState.active) {
@@ -641,11 +638,6 @@
         return;
       }
       const enabled = !removeMode;
-      if (enabled) {
-        allyMode = false;
-        document.getElementById('ally-mode').classList.remove('active');
-        document.getElementById('ally-mode').setAttribute('aria-pressed', 'false');
-      }
       setRemoveMode(enabled);
       setMessage(gameMessage, enabled ? '撤去依頼モードON: 撤去するマスをクリックしてください。' : '撤去依頼モードを解除しました。', false);
     });
