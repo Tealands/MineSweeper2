@@ -299,6 +299,7 @@
       clear: new Audio('Assets/Sounds/Clear.mp3'),
       flag: new Audio('Assets/Sounds/Flag.mp3'),
       miss: new Audio('Assets/Sounds/Miss.mp3'),
+      open: new Audio('Assets/Sounds/Open.mp3'),
       paying: new Audio('Assets/Sounds/Paying.mp3')
     };
     const achievementDifficulties = { 100: '簡単', 200: '普通', 300: '難しい' };
@@ -730,11 +731,13 @@
         setMessage(gameMessage, `撤去依頼には${game.removeCost}$が必要です。`, true);
         return;
       }
+      const safeCellsToOpenBefore = game.board.safeCellsToOpen;
       const result = act(row, col, action);
       if (action === 'ally' && !result.performed) {
         render(viewState('調査できる未開封マスがありません。'));
         return;
       }
+      const openedSafeCell = game.board.safeCellsToOpen < safeCellsToOpenBefore;
       if (action === 'ally') game.money -= game.allyCost;
       if (action === 'remove') game.money -= game.removeCost;
       if (result.hit) game.money -= 100000;
@@ -742,6 +745,7 @@
       game.won = game.board.safeCellsToOpen === 0;
       if (game.won) playSound('clear');
       else if (result.hit) playSound('boom');
+      else if (openedSafeCell) playSound('open');
       else if (result.flagPlaced) playSound('flag');
       else if (action === 'ally') playSound('paying');
       else if (action === 'remove') playSound(result.removedMine ? 'paying' : 'miss');
