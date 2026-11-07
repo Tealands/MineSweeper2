@@ -44,6 +44,26 @@
       font-size: 16px;
     }
     .menu button.secondary:hover { background: #4b5563; }
+    .achievements {
+      width: min(620px, 100%);
+      margin: 28px auto 0;
+      padding: 18px;
+      border: 1px solid #374151;
+      border-radius: 12px;
+      background: #252d3b;
+      text-align: left;
+    }
+    .achievements h2 { margin: 0 0 8px; text-align: center; }
+    #achievement-count, #achievement-message, #clear-achievement-message { text-align: center; }
+    .achievement-message.error { color: #fca5a5; }
+    .achievement-message.success { color: #86efac; }
+    #achievement-list { margin: 12px 0 0; padding: 0; list-style: none; }
+    #achievement-list li {
+      padding: 10px 0;
+      border-top: 1px solid #374151;
+      color: #d1d5db;
+    }
+    #achievement-list li:first-child { border-top: 0; }
     .rules-screen { max-width: 760px; margin: 0 auto; }
     .rules-screen h1 { margin-bottom: 8px; }
     .rules-intro { margin: 0 0 24px; color: #cbd5e1; }
@@ -70,6 +90,28 @@
       font: inherit;
     }
     .rules-back:hover { background: #2563eb; }
+    .clear-screen { max-width: 720px; margin: 0 auto; }
+    .clear-screen h1 { margin-bottom: 10px; color: #86efac; }
+    .clear-intro { margin: 0 0 28px; color: #cbd5e1; }
+    .clear-results {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+    .clear-result {
+      padding: 22px 16px;
+      border: 1px solid #374151;
+      border-radius: 12px;
+      background: #252d3b;
+    }
+    .clear-result-label { display: block; margin-bottom: 8px; color: #cbd5e1; }
+    .clear-result-value { font-size: clamp(24px, 6vw, 36px); font-weight: 700; }
+    .clear-result.money .clear-result-value { color: #facc15; }
+    .clear-result.mines .clear-result-value { color: #86efac; }
+    .clear-result.hits .clear-result-value { color: #fca5a5; }
+    .clear-controls { margin-top: 0; }
+    .clear-controls button { min-width: 180px; }
     button:disabled { cursor: default; }
     .status {
       display: flex;
@@ -156,6 +198,12 @@
     <button type="button" data-mines="200">普通 (地雷 200個)</button>
     <button type="button" data-mines="300">難しい (地雷 300個)</button>
     <button type="button" class="secondary" id="show-rules">遊び方・ルール</button>
+    <section class="achievements" aria-labelledby="achievement-title">
+      <h2 id="achievement-title">🏆 クリア実績</h2>
+      <p id="achievement-count">クリア回数: 0回</p>
+      <p id="achievement-message" role="status" aria-live="polite"></p>
+      <ul id="achievement-list"></ul>
+    </section>
     <div id="home-message" role="status" aria-live="polite"></div>
   </section>
 
@@ -192,6 +240,30 @@
     <button type="button" class="rules-back" id="rules-home">難易度選択に戻る</button>
   </section>
 
+  <section id="clear" class="screen clear-screen" aria-labelledby="clear-title" aria-live="polite">
+    <h1 id="clear-title">🎉 クリア！</h1>
+    <p class="clear-intro">すべての安全なマスを開きました。今回の成績はこちらです。</p>
+    <div class="clear-results">
+      <div class="clear-result money">
+        <span class="clear-result-label">💰 儲け（残り所持金）</span>
+        <span class="clear-result-value" id="clear-money">0$</span>
+      </div>
+      <div class="clear-result mines">
+        <span class="clear-result-label">🚩 自分で見つけた地雷数</span>
+        <span class="clear-result-value" id="clear-mines">0個</span>
+      </div>
+      <div class="clear-result hits">
+        <span class="clear-result-label">💥 被弾数</span>
+        <span class="clear-result-value" id="clear-hits">0回</span>
+      </div>
+    </div>
+    <p id="clear-achievement-message" class="achievement-message" role="status" aria-live="polite"></p>
+    <div class="controls clear-controls">
+      <button type="button" id="clear-restart">もう一度遊ぶ</button>
+      <button type="button" id="clear-home">ホームへ</button>
+    </div>
+  </section>
+
   <section id="game" class="screen">
     <div class="status">
       <span>🚩 残り地雷数: <span id="mines-left">0</span></span>
@@ -216,6 +288,19 @@
     const board = document.getElementById('board');
     const homeMessage = document.getElementById('home-message');
     const gameMessage = document.getElementById('message');
+    const achievementCount = document.getElementById('achievement-count');
+    const achievementMessage = document.getElementById('achievement-message');
+    const clearAchievementMessage = document.getElementById('clear-achievement-message');
+    const achievementList = document.getElementById('achievement-list');
+    const achievementStorageKey = 'minesweeper.clearAchievements';
+    const soundEffects = {
+      boom: new Audio('Assets/Sounds/Boom.mp3'),
+      clear: new Audio('Assets/Sounds/Clear.mp3'),
+      flag: new Audio('Assets/Sounds/Flag.mp3'),
+      miss: new Audio('Assets/Sounds/Miss.mp3'),
+      paying: new Audio('Assets/Sounds/Paying.mp3')
+    };
+    const achievementDifficulties = { 100: '簡単', 200: '普通', 300: '難しい' };
     let currentMines = 100;
     let busy = false;
     let removeMode = false;
@@ -230,11 +315,73 @@
     ];
     let flagColorIndex = 0;
 
+    function playSound(name) {
+      const sound = soundEffects[name];
+      sound.currentTime = 0;
+      sound.play().catch(error => console.warn(`効果音を再生できませんでした (${name}):`, error));
+    }
+
     const show = id => {
       document.querySelectorAll('.screen').forEach(screen => {
         screen.classList.toggle('active', screen.id === id);
       });
+      if (id === 'home') renderAchievements();
     };
+
+    function readAchievements() {
+      const saved = window.localStorage.getItem(achievementStorageKey);
+      if (saved === null) return [];
+      let records;
+      try {
+        records = JSON.parse(saved);
+      } catch {
+        throw new Error('保存したクリア実績を読み取れません。');
+      }
+      const isValidRecord = record => record && typeof record === 'object'
+        && Object.hasOwn(achievementDifficulties, record.mines)
+        && Number.isFinite(record.money)
+        && Number.isInteger(record.foundMineCount) && record.foundMineCount >= 0
+        && Number.isInteger(record.hitCount) && record.hitCount >= 0
+        && typeof record.clearedAt === 'string' && Number.isFinite(Date.parse(record.clearedAt));
+      if (!Array.isArray(records) || !records.every(isValidRecord)) {
+        throw new Error('保存したクリア実績の形式が正しくありません。');
+      }
+      return records;
+    }
+
+    function renderAchievements() {
+      achievementList.replaceChildren();
+      setAchievementMessage('');
+      try {
+        const records = readAchievements();
+        achievementCount.textContent = `クリア回数: ${records.length}回`;
+        records.slice(0, 5).forEach(record => {
+          const item = document.createElement('li');
+          const clearedAt = new Date(record.clearedAt).toLocaleString('ja-JP');
+          item.textContent = `${clearedAt} — ${achievementDifficulties[record.mines]} (地雷 ${record.mines}個) / 残金 ${record.money.toLocaleString('ja-JP')}$ / 発見 ${record.foundMineCount}個 / 被弾 ${record.hitCount}回`;
+          achievementList.appendChild(item);
+        });
+        if (records.length > 5) {
+          const note = document.createElement('li');
+          note.textContent = `最新5件を表示中（全${records.length}件）`;
+          achievementList.appendChild(note);
+        } else if (records.length === 0) {
+          const empty = document.createElement('li');
+          empty.textContent = 'まだクリア実績はありません。';
+          achievementList.appendChild(empty);
+        }
+      } catch (error) {
+        achievementCount.textContent = 'クリア実績を表示できません。';
+        setAchievementMessage(`クリア実績を読み込めませんでした: ${error.message}`, true);
+      }
+    }
+
+    function setAchievementMessage(message, isError = false) {
+      [achievementMessage, clearAchievementMessage].forEach(element => {
+        element.textContent = message;
+        element.className = `achievement-message${message ? (isError ? ' error' : ' success') : ''}`;
+      });
+    }
 
     async function loadField() {
       if (fieldLines) return fieldLines;
@@ -353,6 +500,8 @@
         minesLeft: boardState.totalMines,
         hitCount: boardState.hits,
         flagsCount: boardState.flags,
+        foundMineCount: boardState.cells.flat().filter(cell =>
+          cell.removed || (cell.mine && cell.state === 'flagged')).length,
         money: game.money,
         reward: game.reward,
         allyCost: game.allyCost,
@@ -368,6 +517,7 @@
       const boardState = game.board;
       const cell = boardState.cells[row]?.[col];
       let hit = false;
+      let flagPlaced = false;
       if (cell?.exploded) return { hit, removedMine: false };
       const firstOpen = action === 'open' && !boardState.initialized;
       let removedMine = false;
@@ -377,6 +527,7 @@
           cell.state = 'flagged';
           cell.flagColor = flagColors[flagColorIndex].id;
           boardState.flags++;
+          flagPlaced = true;
         } else if (cell.state === 'flagged') {
           const selectedColor = flagColors[flagColorIndex].id;
           if (cell.flagColor === selectedColor) {
@@ -387,7 +538,7 @@
             cell.flagColor = selectedColor;
           }
         }
-        return { hit, removedMine };
+        return { hit, removedMine, flagPlaced };
       }
 
       if (action === 'ally') {
@@ -485,7 +636,12 @@
     function render(state) {
       latestState = state;
       currentMines = state.mineSetting;
-      show('game');
+      show(state.won ? 'clear' : 'game');
+      if (state.won) {
+        document.getElementById('clear-money').textContent = `${state.money.toLocaleString('ja-JP')}$`;
+        document.getElementById('clear-mines').textContent = `${state.foundMineCount}個`;
+        document.getElementById('clear-hits').textContent = `${state.hitCount}回`;
+      }
       document.getElementById('mines-left').textContent = state.minesLeft;
       document.getElementById('flags-count').textContent = state.flagsCount;
       document.getElementById('money').textContent = state.money;
@@ -561,6 +717,10 @@
       if (!game || game.won) return;
       const cell = game.board.cells[row]?.[col];
       if (action !== 'ally' && !cell?.playable) return;
+      if (action === 'remove' && cell.state === 'opened') {
+        setMessage(gameMessage, 'すでに開いているマスには撤去依頼できません。', false);
+        return;
+      }
       if (action === 'ally' && game.money < game.allyCost) {
         setMessage(gameMessage, `仲間を使うには${game.allyCost}$が必要です。`, true);
         return;
@@ -579,6 +739,29 @@
       if (result.hit) game.money -= 100000;
       if (action === 'open' || action === 'remove' || action === 'ally') game.firstMove = false;
       game.won = game.board.safeCellsToOpen === 0;
+      if (game.won) playSound('clear');
+      else if (result.hit) playSound('boom');
+      else if (result.flagPlaced) playSound('flag');
+      else if (action === 'ally') playSound('paying');
+      else if (action === 'remove') playSound(result.removedMine ? 'paying' : 'miss');
+      if (game.won) {
+        try {
+          const records = readAchievements();
+          records.unshift({
+            mines: game.mineSetting,
+            money: game.money,
+            foundMineCount: game.board.cells.flat().filter(cell =>
+              cell.removed || (cell.mine && cell.state === 'flagged')).length,
+            hitCount: game.board.hits,
+            clearedAt: new Date().toISOString()
+          });
+          window.localStorage.setItem(achievementStorageKey, JSON.stringify(records));
+          renderAchievements();
+          setAchievementMessage('今回のクリア実績を保存しました。');
+        } catch (error) {
+          setAchievementMessage(`クリア実績を保存できませんでした: ${error.message}`, true);
+        }
+      }
       const message = game.won ? 'クリア、すべての安全なマスを開きました。'
         : result.hit ? '地雷を踏みました。治療費100000$を支払いました。'
         : action === 'open' ? 'マスを開きました。'
@@ -647,8 +830,14 @@
       cycleFlagColor();
     });
     updateFlagColor();
+    renderAchievements();
     document.getElementById('restart').addEventListener('click', () => startGame(currentMines));
     document.getElementById('back-home').addEventListener('click', () => {
+      setRemoveMode(false);
+      show('home');
+    });
+    document.getElementById('clear-restart').addEventListener('click', () => startGame(currentMines));
+    document.getElementById('clear-home').addEventListener('click', () => {
       setRemoveMode(false);
       show('home');
     });
